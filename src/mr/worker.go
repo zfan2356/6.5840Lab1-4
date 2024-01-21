@@ -1,12 +1,13 @@
 package mr
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-    "io"
-    "io/ioutil"
+	"io"
 	"os"
-    "sync"
-    "time"
+	"sync"
+	"time"
 )
 import "log"
 import "net/rpc"
@@ -28,9 +29,9 @@ func ihash(key string) int {
 
 // 请求task的方法
 func doHeartBeat() *HeartbeatResponse {
-	response := HeartbeatResponse{}
-	call("Coordinator.HeartBeat", &HeartbeatRequest{}, &response)
-	return &response
+	response := &HeartbeatResponse{}
+	call("Coordinator.HeartBeat", &HeartbeatRequest{}, response)
+	return response
 }
 
 // 汇报task的完成情况
@@ -39,55 +40,84 @@ func doReport(id int, phase SchedulePhase) {
 }
 
 func doMapTask(mapf func(string, string) []KeyValue, response *HeartbeatResponse) {
-	file, err := os.Open(response.FileName)
-	defer file.Close()
+	filename := response.FileName
+	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("cannot open file %v \n", response.FileName)
-		return
+		log.Fatalf("cannot open file %v \n", filename)
 	}
 	content, err := io.ReadAll(file)
 	if err != nil {
-		log.Fatalf("cannot read file %v\n", response.FileName)
-		return
+		log.Fatalf("cannot read file %v\n", filename)
 	}
-
-	kva := mapf(response.FileName, string(content))
-    intermediates := make([][]KeyValue, response.NReduce)
-    for _, kv := range kva {
-        idx := ihash(kv.Key) % response.NReduce
-        intermediates[idx] = append(intermediates[idx], kv)
-    }
-    var wg sync.WaitGroup
-    for i, intermediate := range intermediates {
-        wg.Add(1)
-        go func(idx int, intermediate []KeyValue) {
-            defer wg.Done()
-            interFilePath := 
-        }(i, intermediate)
-    }
-    wg.Wait()
-    doReport(response.Id, MapPhase)
+	file.Close()
+	kva := mapf(filename, string(content))
+	intermediates := make([][]KeyValue, response.NReduce)
+	for _, kv := range kva {
+		idx := ihash(kv.Key) % response.NReduce
+		intermediates[idx] = append(intermediates[idx], kv)
+	}
+	var wg sync.WaitGroup
+	for i, intermediate := range intermediates {
+		wg.Add(1)
+		go func(idx int, intermediate []KeyValue) {
+			defer wg.Done()
+			interFilePath := generateMapResultFileName(response.Id, idx)
+			var buf bytes.Buffer
+			enc := json.NewEncoder(&buf)
+			for _, kv := range intermediate {
+				err := enc.Encode(&kv)
+				if err != nil {
+					log.Fatalf("cannot encode json %v\n", kv)
+				}
+			}
+			err := atomicWriteFile(interFilePath, &buf)
+			if err != nil {
+				log.Fatalf("map write file failed, err: %v \n", err)
+			}
+		}(i, intermediate)
+	}
+	wg.Wait()
+	doReport(response.Id, MapPhase)
 }
 
 func doReduceTask(reducef func(string, []string) string, response *HeartbeatResponse) {
 	var kva []KeyValue
-	for i := 0; i < response.NReduce; i++ {
-
+	for i := 0; i < response.NMap; i++ {
+		filePath := generateMapResultFileName(i, response.Id)
+		file, err := os.Open(filePath)
+		if err != nil {
+			log.Fatalf("cannot open file %v \n", filePath)
+		}
+		dec := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			kva = append(kva, kv)
+		}
+		file.Close()
 	}
+	results := make(map[string][]string)
+	for _, kv := range kva {
+		results[kv.Key] = append(results[kv.Key], kv.Value)
+	}
+	var buf bytes.Buffer
+	for k, v := range results {
+		output := reducef(k, v)
+		fmt.Fprintf(&buf, "%v %v\n", k, output)
+	}
+	atomicWriteFile(generateReduceResultFileName(response.Id), &buf)
+	doReport(response.Id, ReducePhase)
 }
 
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	// Your worker implementation here.
-
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
-
 	for {
 		response := doHeartBeat()
-		log.Printf("Worker: receive coordinator's heartbeat %v \n", response)
+		//log.Printf("Worker: receive coordinator's heartbeat %v \n", response)
 		switch response.TaskType {
 		case MapTask:
 			doMapTask(mapf, response)

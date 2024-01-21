@@ -52,3 +52,11 @@ const (
 	Working
 	Finished
 )
+
+func generateMapResultFileName(mapnumber, reducenumber int) string {
+	return fmt.Sprintf("mr-%d-%d", mapnumber, reducenumber)
+}
+
+func generateReduceResultFileName(reducenumber int) string {
+	return fmt.Sprintf("mr-out-%d", reducenumber)
+}

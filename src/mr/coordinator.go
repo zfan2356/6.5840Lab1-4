@@ -17,7 +17,7 @@ type Task struct {
 	filename  string
 	id        int
 	startTime time.Time
-	status    int
+	status    TaskStatus
 }
 
 type Coordinator struct {
@@ -34,7 +34,7 @@ type Coordinator struct {
 
 type heartbeatMsg struct {
 	response *HeartbeatResponse
-	ok       chan struct{}
+	ok       chan struct{} // 用来进行异步操作, 表示是否完成了这次response的处理
 }
 
 type reportMsg struct {
@@ -43,21 +43,24 @@ type reportMsg struct {
 }
 
 // Your code here -- RPC handlers for the worker to call.
-
+// 相当于Worker的一次请求, 然后Coordinator回复具体的状态,
+// 比如分配的任务编号以及状态, 文件名称, 还有当前的map和reduce的任务数量
 func (c *Coordinator) HeartBeat(request *HeartbeatRequest, response *HeartbeatResponse) error {
-	msg := heartbeatMsg{response, make(chan struct{})}
+	msg := heartbeatMsg{response, make(chan struct{}, 1)}
 	c.heartbeatCh <- msg
 	<-msg.ok
 	return nil
 }
 
+// Worker的回复, 报告这次任务已经完成, 附带的信息是task的编号, 以及task的状态
 func (c *Coordinator) Report(request *ReportRequest, response *ReportResponse) error {
-	msg := reportMsg{request, make(chan struct{})}
+	msg := reportMsg{request, make(chan struct{}, 1)}
 	c.reportCh <- msg
 	<-msg.ok
 	return nil
 }
 
+// 将Coordinator置为Map模式, 将task初始化为maptask
 func (c *Coordinator) initMapPhase() {
 	c.phase = MapPhase
 	c.tasks = make([]Task, len(c.files))
@@ -70,6 +73,7 @@ func (c *Coordinator) initMapPhase() {
 	}
 }
 
+// 将Coordinator置为reduce模式, 将task初始化为reducetask
 func (c *Coordinator) initReducePhase() {
 	c.phase = ReducePhase
 	c.tasks = make([]Task, c.nReduce)
@@ -81,11 +85,14 @@ func (c *Coordinator) initReducePhase() {
 	}
 }
 
+// 将Coordinator置为Complete模式, 然后给管道传递信息表示已经完成任务
 func (c *Coordinator) initCompletePhase() {
 	c.phase = CompletePhase
 	c.doneCh <- struct{}{}
 }
 
+// 找到符合当前状态的任务, 如果找不到, 说明当前状态下任务已经全部完成, 返回true
+// 如果找到了, 返回false, 并将任务的信息存储到response中, 回复给Worker
 func (c *Coordinator) selectTask(response *HeartbeatResponse) bool {
 	allfinished := true
 	ok := false
@@ -116,7 +123,6 @@ func (c *Coordinator) selectTask(response *HeartbeatResponse) bool {
 				}
 			}
 		case Finished:
-
 		}
 		if ok {
 			break
@@ -138,18 +144,20 @@ func (c *Coordinator) schedule() {
 			} else if c.selectTask(msg.response) {
 				switch c.phase {
 				case MapPhase:
-					log.Printf("Coordinator: %v finished, start %v \n", MapPhase, ReducePhase)
+					//log.Printf("Coordinator: %v finished, start %v \n", MapPhase, ReducePhase)
 					c.initReducePhase()
 					c.selectTask(msg.response)
 				case ReducePhase:
-					log.Printf("Coordinator: %v finished, end!", ReducePhase)
+					//log.Printf("Coordinator: %v finished, end!", ReducePhase)
+					c.initCompletePhase()
+					msg.response.TaskType = CompleteTask
 				}
 			}
-			log.Printf("Coordinator: assigned a task %v to worker \n", msg.response)
+			//log.Printf("Coordinator: assigned a task %v to worker \n", msg.response)
 			msg.ok <- struct{}{}
 		case msg := <-c.reportCh:
 			if msg.request.Phase == c.phase {
-				log.Printf("Coordinator: Worker has executed task %v \n", msg.request)
+				//log.Printf("Coordinator: Worker has executed task %v \n", msg.request)
 				c.tasks[msg.request.Id].status = Finished
 			}
 			msg.ok <- struct{}{}
@@ -196,7 +204,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		nMap:        len(files),
 		heartbeatCh: make(chan heartbeatMsg),
 		reportCh:    make(chan reportMsg),
-		doneCh:      make(chan struct{}),
+		doneCh:      make(chan struct{}, 1),
 	}
 	c.server()
 	go c.schedule()
