@@ -1,20 +1,10 @@
-Lab1 test pass!
-```c++
-*** Starting wc test.
---- wc test: PASS
-*** Starting indexer test.
---- indexer test: PASS
-*** Starting map parallelism test.
---- map parallelism test: PASS
-*** Starting reduce parallelism test.
---- reduce parallelism test: PASS
-*** Starting job count test.
---- job count test: PASS
-2024/01/21 20:27:21 dialing:dial-http unix /var/tmp/5840-mr-501: unexpected EOF
-*** Starting early exit test.
---- early exit test: PASS
-*** Starting crash test.
---- crash test: PASS
-*** PASSED ALL TESTS
+## Lab1: MapReduce
+![img.png](img%2Fimg.png)
 
-```
+### 1. 思路
+![img_1.png](img%2Fimg_1.png)
+
+### 2. 实现细节
+1. 实现过程中没有使用互斥锁, 而是使用 $channel$ 来实现
+2. 由于 $RPC$采用的是 $http$ 协议进行传输数据, 所以定义了$Request$ 请求体
+和$Response$ 返回体

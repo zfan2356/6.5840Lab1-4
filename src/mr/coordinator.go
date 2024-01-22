@@ -13,6 +13,7 @@ const (
 	MaxTaskRunInterval = time.Second * 10
 )
 
+// Task 定义task的各种基本属性
 type Task struct {
 	filename  string
 	id        int
@@ -20,6 +21,7 @@ type Task struct {
 	status    TaskStatus
 }
 
+// Coordinator 定义基本属性, 这是中央协调机
 type Coordinator struct {
 	// Your definitions here.
 	files       []string
@@ -32,18 +34,22 @@ type Coordinator struct {
 	doneCh      chan struct{} // 仅用于传递信息, 表示已经完成
 }
 
+// 一次活动的信号, 因为每次活动是原子性的, 所以定义一个管道来保证异步操作
 type heartbeatMsg struct {
 	response *HeartbeatResponse
 	ok       chan struct{} // 用来进行异步操作, 表示是否完成了这次response的处理
 }
 
+// 一次回复对应的信号, 同样定义一个管道
 type reportMsg struct {
 	request *ReportRequest
 	ok      chan struct{}
 }
 
 // Your code here -- RPC handlers for the worker to call.
-// 相当于Worker的一次请求, 然后Coordinator回复具体的状态,
+// 接下来定义的是处理函数handlers, 负责和Worker之间的通信
+
+// HeartBeat 相当于Worker的一次请求, 然后Coordinator回复具体的状态
 // 比如分配的任务编号以及状态, 文件名称, 还有当前的map和reduce的任务数量
 func (c *Coordinator) HeartBeat(request *HeartbeatRequest, response *HeartbeatResponse) error {
 	msg := heartbeatMsg{response, make(chan struct{}, 1)}
@@ -52,7 +58,7 @@ func (c *Coordinator) HeartBeat(request *HeartbeatRequest, response *HeartbeatRe
 	return nil
 }
 
-// Worker的回复, 报告这次任务已经完成, 附带的信息是task的编号, 以及task的状态
+// Report Worker的回复, 报告这次任务已经完成, 附带的信息是task的编号, 以及task的状态
 func (c *Coordinator) Report(request *ReportRequest, response *ReportResponse) error {
 	msg := reportMsg{request, make(chan struct{}, 1)}
 	c.reportCh <- msg

@@ -23,6 +23,8 @@ type ExampleReply struct {
 }
 
 // Add your RPC definitions here.
+
+// ReportRequest 报告完成的任务ID以及当前完成的是什么状态的任务(map or reduce)
 type ReportRequest struct {
 	Id    int
 	Phase SchedulePhase
@@ -30,6 +32,7 @@ type ReportRequest struct {
 type ReportResponse struct {
 }
 
+// HeartbeatResponse Coordinator返回的响应, 包括分配给这个worker的task的详细信息
 type HeartbeatResponse struct {
 	TaskType TaskType
 	NMap     int
@@ -37,7 +40,6 @@ type HeartbeatResponse struct {
 	Id       int
 	FileName string
 }
-
 type HeartbeatRequest struct {
 }
 

@@ -21,6 +21,8 @@ func main() {
 	}
 
 	m := mr.MakeCoordinator(os.Args[1:], 10)
+	// 因为Done这里采用的是管道阻塞的方法防止并发异常, 所以这里可以换一种写法
+	// 直接调用 m.Done() 即可
 	for m.Done() == false {
 		time.Sleep(time.Second)
 	}
