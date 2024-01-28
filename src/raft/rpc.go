@@ -29,8 +29,8 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term          int
 	Success       bool
-	ConflictIndex int // 冲突的index
-	ConflictTerm  int // 冲突的term
+	ConflictIndex int // 期望的term下的最小的index
+	ConflictTerm  int // 期望的term
 }
 
 func (rf *Raft) genRequestVoteArgs() *RequestVoteArgs {

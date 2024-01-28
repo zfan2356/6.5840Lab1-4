@@ -14,6 +14,10 @@
 ## Lab2: Raft
 [raft论文中文翻译](https://zhuanlan.zhihu.com/p/343560811)
 
+[很不错的raft实现过程和原理](https://www.cnblogs.com/brianleelxt/p/13251540.html)
+### 选举过程
+![img.png](img%2Fimg.png)
+
 ### 协程相关信息
 ![img_2.png](img%2Fimg_2.png)
 

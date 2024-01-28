@@ -79,6 +79,18 @@ func (rf Raft) encodeState() []byte {
 	return w.Bytes()
 }
 
+// needReplicating 编号为peer的服务器是否需要让其他节点更新日志 (只有Leader才能让其他节点同步自己的日志)
+func (rf *Raft) needReplicating(peer int) bool {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	return rf.state == StateLeader && rf.matchIndex[peer] < rf.getLastLog().Index
+}
+
+// matchLog 传进来的log是否匹配当前rf对应Index的log
+func (rf *Raft) matchLog(term, index int) bool {
+	return index <= rf.getLastLog().Index && rf.logs[index-rf.getFirstLog().Index].Term == term
+}
+
 // ifLogUpToDate 判断当前节点的log是否已经过期, 如果过期返回true (其实和判断log这个序列的字典序一样)
 func (rf *Raft) ifLogUpToDate(term, index int) bool {
 	lastlog := rf.getLastLog()
@@ -87,9 +99,10 @@ func (rf *Raft) ifLogUpToDate(term, index int) bool {
 
 // changeState 服务器改变状态
 func (rf *Raft) changeState(state NodeState) {
-	if rf.state == state {
-		return
-	}
+	//if rf.state == state {
+	//	return
+	//}
+	// 这里转换state其实是刷新状态, 也有可能出现follower -> follower的情况, 实测如果return掉, 会出现FailNoAgree2B错误
 	DPrintf("{Node %d} changes state from %d to %d in term %d", rf.me, rf.state, state, rf.currentTerm)
 	rf.state = state
 	switch state {
@@ -107,37 +120,6 @@ func (rf *Raft) changeState(state NodeState) {
 		rf.electionTimer.Stop()
 		rf.heartbeatTimer.Reset(StableHeartBeatTimeout())
 	}
-}
-
-// RequestVote RPC handler. 请求投票处理函数
-func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (2A, 2B).
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	defer rf.persist()
-	defer DPrintf("{Node %v}'s state is {state %v,term %v,commitIndex %v,lastApplied %v,firstLog %v,lastLog %v} before processing requestVoteRequest %v and reply requestVoteResponse %v",
-		rf.me, rf.state, rf.currentTerm, rf.commitIndex, rf.lastApplied, rf.getFirstLog(), rf.getLastLog(), args, reply)
-
-	// 当候选者的term小于当前节点的term, 直接false, 当候选者的term等于当前的term但是当前节点已经投票给候选者的时候也false
-	if args.Term < rf.currentTerm || (args.Term == rf.currentTerm && rf.voteFor != -1 && rf.voteFor != args.CandidateId) {
-		reply.Term, reply.VoteGranted = rf.currentTerm, false
-		return
-	}
-	// 当候选者的term大于当前节点的term, 要转化为follower
-	if args.Term > rf.currentTerm {
-		rf.changeState(StateFollower)
-		rf.currentTerm, rf.voteFor = args.Term, -1
-	}
-	// 如果当前节点的没有过期, 也就是当前节点版本不小于候选人版本, 所以可以返回false
-	if !rf.ifLogUpToDate(args.LastLogTerm, args.LastLogIndex) {
-		reply.Term, reply.VoteGranted = rf.currentTerm, false
-		return
-	}
-	rf.voteFor = args.CandidateId
-	// TODO 去掉了这一段话, 因为候选人投票按理说应该不影响自身计时器
-	//rf.electionTimer.Reset(RandomizedElectionTimeout())
-	reply.Term, reply.VoteGranted = rf.currentTerm, true
-
 }
 
 // advanceCommitIndexForLeader 根据follower的同步进度, 算出来当前应该提交到服务器的Index
@@ -170,46 +152,6 @@ func (rf *Raft) advanceCommitIndexForFollower(leaderCommit int) {
 	}
 }
 
-func (rf *Raft) StartElection() {
-	args := rf.genRequestVoteArgs()
-	DPrintf("{Node %v} starts election with RequestVoteRequest %v", rf.me, args)
-
-	grantedVotes := 1 // 来自本身的投票
-	rf.voteFor = rf.me
-	rf.persist()
-	for i := 0; i < len(rf.peers); i++ {
-		if i == rf.me {
-			continue
-		}
-		go func(index int) {
-			reply := new(RequestVoteReply)
-			if rf.sendRequestVote(index, args, reply) {
-				rf.mu.Lock()
-				defer rf.mu.Unlock()
-				DPrintf("{Node %v} receives RequestVoteResponse %v from {Node %v} "+
-					"after sending RequestVoteRequest %v in term %v", rf.me, reply, index, args, rf.currentTerm)
-
-				if rf.currentTerm == args.Term && rf.state == StateCandidate {
-					if reply.VoteGranted {
-						grantedVotes += 1
-						if grantedVotes > len(rf.peers)/2 {
-							DPrintf("{Node %v} receives majority votes in term %v", rf.me, rf.currentTerm)
-							rf.changeState(StateLeader)
-							rf.BroadcastHeartBeat(true)
-						}
-					} else if reply.Term > rf.currentTerm {
-						DPrintf("{Node %v} finds a new leader {Node %v} "+
-							"with term %v and steps down in term %v", rf.me, index, reply.Term, rf.currentTerm)
-						rf.changeState(StateFollower)
-						rf.currentTerm, rf.voteFor = reply.Term, -1
-						rf.persist()
-					}
-				}
-			}
-		}(i)
-	}
-}
-
 // BroadcastHeartBeat 广播心跳信号, 然后执行复制功能
 func (rf *Raft) BroadcastHeartBeat(isHeartBeat bool) {
 	for i := 0; i < len(rf.peers); i++ {
@@ -225,6 +167,8 @@ func (rf *Raft) BroadcastHeartBeat(isHeartBeat bool) {
 		}
 	}
 }
+
+// replicateOneRound 当前Leader给编号为peer的节点发送appendentries请求, 同步日志
 func (rf *Raft) replicateOneRound(peer int) {
 	rf.mu.Lock()
 	if rf.state != StateLeader {
@@ -274,6 +218,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	return newLog.Index, newLog.Term, true
 }
 
+// Kill 返回raft算法是否结束
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
 	// Your code here, if desired.
@@ -286,7 +231,6 @@ func (rf *Raft) killed() bool {
 // ticker 开启一个协程来监控节点的计时器是否到期
 func (rf *Raft) ticker() {
 	for rf.killed() == false {
-
 		// Your code here (2A)
 		// Check if a leader election should be started.
 		select {
@@ -306,18 +250,6 @@ func (rf *Raft) ticker() {
 			rf.mu.Unlock()
 		}
 	}
-}
-
-// needReplicating 编号为peer的服务器是否需要让其他节点更新日志 (只有Leader才能让其他节点同步自己的日志)
-func (rf *Raft) needReplicating(peer int) bool {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	return rf.state == StateLeader && rf.matchIndex[peer] < rf.getLastLog().Index
-}
-
-// matchLog 传进来的log是否匹配当前rf对应Index的log
-func (rf *Raft) matchLog(term, index int) bool {
-	return index <= rf.getLastLog().Index && rf.logs[index-rf.getFirstLog().Index].Term == term
 }
 
 // replicator 每个节点又开启n-1个协程, 来监控其他的节点

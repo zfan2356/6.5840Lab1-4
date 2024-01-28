@@ -20,7 +20,7 @@ func (rf *Raft) appendNewEntry(command interface{}) Entry {
 	return newLog
 }
 
-// AppendEntries RPC handler, 广播心跳处理函数, 同时执行复制功能
+// AppendEntries RPC handler, 广播心跳处理函数, 同时执行复制功能, 节点接收args, 返回一个reply
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -39,8 +39,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.currentTerm, rf.voteFor = args.Term, -1
 	}
 	rf.changeState(StateFollower)
-	rf.electionTimer.Reset(RandomizedElectionTimeout())
-
+	//rf.electionTimer.Reset(RandomizedElectionTimeout())
 	if args.PrevLogTerm < rf.getFirstLog().Index {
 		// 缓存在快照中, 但是在之前已经被特判过, 所以应该警告一下, 然后返回
 		reply.Term, reply.Success = 0, false
@@ -48,7 +47,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.me, args, args.LeaderId, args.PrevLogIndex, rf.getFirstLog().Index)
 		return
 	}
-
 	// 不匹配, 说明会有冲突, 补全冲突细节
 	if !rf.matchLog(args.PrevLogTerm, args.PrevLogIndex) {
 		reply.Term, reply.Success = rf.currentTerm, false
@@ -57,7 +55,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			// 如果广播的要添加的log下标比当前最大的下标要大, 说明之前还有的log没有同步成功
 			reply.ConflictTerm, reply.ConflictIndex = -1, lastIndex+1
 		} else {
-			// 否则就是当前广播的log已经同步过了
+			// 否则就是previndex对应的节点的log的term不匹配(其实就是节点中的term偏小)
 			firstIndex := rf.getFirstLog().Index
 			reply.ConflictTerm = rf.logs[args.PrevLogIndex-firstIndex].Term
 			index := args.PrevLogIndex - 1
@@ -68,7 +66,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 		return
 	}
-
 	firstIndex := rf.getFirstLog().Index
 	for idx, entry := range args.Entries {
 		if entry.Index-firstIndex >= len(rf.logs) || rf.logs[entry.Index-firstIndex].Term != entry.Term {
@@ -81,9 +78,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 }
 
+// handleAppendEntriesReply leader处理节点appendEntries之后返回的reply, 然后准备提交
 func (rf *Raft) handleAppendEntriesReply(peer int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	if rf.state == StateLeader && rf.currentTerm == args.Term {
 		if reply.Success {
+			// 成功append了日志, 然后计算提交的日志下标, 直接提交即可
 			rf.matchIndex[peer] = args.PrevLogIndex + len(args.Entries)
 			rf.nextIndex[peer] = rf.matchIndex[peer] + 1
 			rf.advanceCommitIndexForLeader()
@@ -94,10 +93,12 @@ func (rf *Raft) handleAppendEntriesReply(peer int, args *AppendEntriesArgs, repl
 				rf.persist()
 			} else if rf.currentTerm == reply.Term {
 				// 既然不是term的问题, 说明就是存在conflict
-				rf.nextIndex[peer] = reply.ConflictIndex
-				// 根据是否-1来判断到底是已经同步过, 还是之前仍有log尚未同步
-				if reply.ConflictTerm != -1 {
-					// 之前有log没有匹配, 可以向前遍历, 找到那个第一个没有同步的log
+				// 如果返回的Term等于-1, 说明leader要求的同步日志index高于peer节点的index
+				if reply.ConflictTerm == 1 {
+					rf.nextIndex[peer] = reply.ConflictIndex
+				} else {
+					// 之前有log的term没有匹配, 其实就是previndex在节点中对应的log的term比当前的term小
+					// 可以在leader的日志中向前遍历, 找到那个第一个与节点返回的term相同的log
 					firstIndex := rf.getFirstLog().Index
 					for i := args.PrevLogIndex; i >= firstIndex; i-- {
 						if rf.logs[i-firstIndex].Term == reply.ConflictTerm {
