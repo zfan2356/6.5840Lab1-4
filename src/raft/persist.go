@@ -1,9 +1,23 @@
 package raft
 
-func (rf Raft) GetRaftStateSize() int {
+import (
+	"6.5840/labgob"
+	"bytes"
+)
+
+func (rf *Raft) GetRaftStateSize() int {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	return rf.persister.RaftStateSize()
+}
+
+func (rf *Raft) encodeState() []byte {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.voteFor)
+	e.Encode(rf.logs)
+	return w.Bytes()
 }
 
 // save Raft's persistent state to stable storage,
@@ -15,13 +29,7 @@ func (rf Raft) GetRaftStateSize() int {
 // (or nil if there's not yet a snapshot).
 func (rf *Raft) persist() {
 	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	rf.persister.SaveRaftState(rf.encodeState())
 }
 
 // restore previously persisted state.
@@ -30,16 +38,17 @@ func (rf *Raft) readPersist(data []byte) {
 		return
 	}
 	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm, voteFor int
+	var logs []Entry
+	if d.Decode(&currentTerm) != nil ||
+		d.Decode(&voteFor) != nil ||
+		d.Decode(&logs) != nil {
+		DPrintf("{Node %v} restores persisted state failed", rf.me)
+		return
+	}
+	rf.currentTerm, rf.voteFor, rf.logs = currentTerm, voteFor, logs
+	// logs中一定会至少存在一个log
+	rf.lastApplied, rf.commitIndex = rf.logs[0].Index, rf.logs[0].Index
 }

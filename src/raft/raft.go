@@ -18,8 +18,6 @@ package raft
 //
 
 import (
-	"6.5840/labgob"
-	"bytes"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,11 +42,12 @@ type Raft struct {
 	replicatorCond []*sync.Cond
 	state          NodeState
 
+	// 以下三条是raft状态机可持久化的状态
 	currentTerm int
 	voteFor     int
 	logs        []Entry
 
-	commitIndex int   // 当前需要提交到服务器的最大index
+	commitIndex int   // 当前提交到服务器的最大index
 	lastApplied int   // 上一次提交至的Index
 	nextIndex   []int // 下一次同步的log的Index
 	matchIndex  []int // leader当前已经同步的日志进度
@@ -69,14 +68,6 @@ func (rf *Raft) getLastLog() Entry {
 }
 func (rf *Raft) getFirstLog() Entry {
 	return rf.logs[0]
-}
-func (rf Raft) encodeState() []byte {
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-	e.Encode(rf.currentTerm)
-	e.Encode(rf.voteFor)
-	e.Encode(rf.logs)
-	return w.Bytes()
 }
 
 // needReplicating 编号为peer的服务器是否需要让其他节点更新日志 (只有Leader才能让其他节点同步自己的日志)
@@ -99,9 +90,9 @@ func (rf *Raft) ifLogUpToDate(term, index int) bool {
 
 // changeState 服务器改变状态
 func (rf *Raft) changeState(state NodeState) {
-	//if rf.state == state {
-	//	return
-	//}
+	if rf.state == state {
+		return
+	}
 	// 这里转换state其实是刷新状态, 也有可能出现follower -> follower的情况, 实测如果return掉, 会出现FailNoAgree2B错误
 	DPrintf("{Node %d} changes state from %d to %d in term %d", rf.me, rf.state, state, rf.currentTerm)
 	rf.state = state
@@ -179,6 +170,14 @@ func (rf *Raft) replicateOneRound(peer int) {
 	prevLogIndex := rf.nextIndex[peer] - 1
 	if prevLogIndex < rf.getFirstLog().Index {
 		// TODO 已经被快照缓存下
+		args := rf.genInstallSnapshotArgs()
+		rf.mu.Unlock()
+		reply := new(InstallSnapshotReply)
+		if rf.sendInstallSnapshot(peer, args, reply) {
+			rf.mu.Lock()
+			rf.handleInstallSnapshotReply(peer, args, reply)
+			rf.mu.Unlock()
+		}
 	} else {
 		args := rf.genAppendEntriesArgs(prevLogIndex)
 		rf.mu.Unlock()
@@ -277,7 +276,6 @@ func (rf *Raft) applier() {
 		entries := make([]Entry, commitIndex-lastApplied)
 		copy(entries, rf.logs[lastApplied+1-firstIndex:commitIndex+1-firstIndex])
 		rf.mu.Unlock()
-
 		for _, entry := range entries {
 			rf.applyCh <- ApplyMsg{
 				CommandValid: true,
@@ -342,7 +340,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
-
 	go rf.applier()
 
 	return rf

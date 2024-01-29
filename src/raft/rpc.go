@@ -33,6 +33,18 @@ type AppendEntriesReply struct {
 	ConflictTerm  int // 期望的term
 }
 
+type InstallSnapshotArgs struct {
+	Term              int
+	LeaderId          int
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Data              []byte
+}
+
+type InstallSnapshotReply struct {
+	Term int
+}
+
 func (rf *Raft) genRequestVoteArgs() *RequestVoteArgs {
 	args := &RequestVoteArgs{
 		Term:         rf.currentTerm,
@@ -44,15 +56,26 @@ func (rf *Raft) genRequestVoteArgs() *RequestVoteArgs {
 }
 func (rf *Raft) genAppendEntriesArgs(index int) *AppendEntriesArgs {
 	firstIndex := rf.getFirstLog().Index
-	entries := make([]Entry, 0)
-	entries = append(entries, rf.logs[index+1-firstIndex:]...)
+	// entries 复制了 index+1 -> 最后的log
+	entries := make([]Entry, len(rf.logs[index+1-firstIndex:]))
+	copy(entries, rf.logs[index+1-firstIndex:])
 	return &AppendEntriesArgs{
 		Term:         rf.currentTerm,
 		LeaderId:     rf.me,
 		PrevLogIndex: index,
-		PrevLogTerm:  rf.logs[index].Term,
+		PrevLogTerm:  rf.logs[index-firstIndex].Term,
 		LeaderCommit: rf.commitIndex,
 		Entries:      entries,
+	}
+}
+func (rf *Raft) genInstallSnapshotArgs() *InstallSnapshotArgs {
+	firstLog := rf.getFirstLog()
+	return &InstallSnapshotArgs{
+		Term:              rf.currentTerm,
+		LeaderId:          rf.me,
+		LastIncludedIndex: firstLog.Index,
+		LastIncludedTerm:  firstLog.Term,
+		Data:              rf.persister.ReadSnapshot(),
 	}
 }
 
@@ -66,4 +89,8 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
+}
+
+func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
+	return rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
 }

@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"sync"
@@ -45,6 +46,18 @@ const (
 	StateCandidate
 	StateLeader
 )
+
+func (state NodeState) String() string {
+	switch state {
+	case StateFollower:
+		return "Follower"
+	case StateCandidate:
+		return "Candidate"
+	case StateLeader:
+		return "Leader"
+	}
+	panic(fmt.Sprintf("unexpected NodeState %d", state))
+}
 
 type lockRand struct {
 	mu   sync.Mutex
