@@ -1,14 +1,14 @@
 ## Lab1: MapReduce
-### 结果
+#### 结果
 ![lab1_result.png](img%2Flab1_result.png)
 
-### 1. 思路
+#### 1. 思路
 ![img_1.png](img%2Fimg_1.png)
 
-### 2. 实现细节
+#### 2. 实现细节
 1. 实现过程中没有使用互斥锁, 而是使用 $channel$ 来实现
-2. 由于 $RPC$采用的是 $http$ 协议进行传输数据, 所以定义了$Request$ 请求体
-和$Response$ 返回体
+2. 由于 $RPC$ 采用的是 $http$ 协议进行传输数据, 所以定义了 $Request$ 请求体
+和 $Response$ 返回体
 
 
 ## Lab2: Raft
