@@ -6,6 +6,7 @@ package raft
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
+	// 这里表示快照已经处理到从一开始到index(包括index)的所有指令, 这些指令都存储到了snapshot中
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	snapshotIndex := rf.getFirstLog().Index

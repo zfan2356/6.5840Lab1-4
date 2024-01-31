@@ -31,3 +31,9 @@
 
 #### 2. Lab2B
 ![lab2B_result.png](img%2Flab2B_result.png)
+
+#### 3. Lab2C
+![lab2C_result.png](img%2Flab2C_result.png)
+
+#### 4. Lba2D
+![lab2D_result.png](img%2Flab2D_result.png)

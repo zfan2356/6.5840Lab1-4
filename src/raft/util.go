@@ -4,18 +4,20 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 )
 
 // Debugging
-const Debug = false
+const Debug = true
 
-func DPrintf(format string, a ...interface{}) (n int, err error) {
+func DPrintf(format string, a ...interface{}) {
 	if Debug {
+		logFile, _ := os.OpenFile("./debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		log.SetOutput(logFile)
 		log.Printf(format, a...)
 	}
-	return
 }
 
 // as each Raft peer becomes aware that successive log entries are
@@ -37,6 +39,16 @@ type ApplyMsg struct {
 	Snapshot      []byte
 	SnapshotTerm  int
 	SnapshotIndex int
+}
+
+func (msg ApplyMsg) String() string {
+	if msg.CommandValid {
+		return fmt.Sprintf("{Command:%v,CommandTerm:%v,CommandIndex:%v}", msg.Command, msg.CommandTerm, msg.CommandIndex)
+	} else if msg.SnapshotValid {
+		return fmt.Sprintf("{Snapshot:%v,SnapshotTerm:%v,SnapshotIndex:%v}", msg.Snapshot, msg.SnapshotTerm, msg.SnapshotIndex)
+	} else {
+		panic(fmt.Sprintf("unexpected ApplyMsg{CommandValid:%v,CommandTerm:%v,CommandIndex:%v,SnapshotValid:%v,SnapshotTerm:%v,SnapshotIndex:%v}", msg.CommandValid, msg.CommandTerm, msg.CommandIndex, msg.SnapshotValid, msg.SnapshotTerm, msg.SnapshotIndex))
+	}
 }
 
 type NodeState uint8
@@ -108,7 +120,7 @@ func shrinkEntriesArray(entries []Entry) []Entry {
 func insertionSort(s []int) {
 	a, b := 0, len(s)
 	for i := a + 1; i < b; i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+		for j := i; j > a && s[j] < s[j-1]; j-- {
 			s[j], s[j-1] = s[j-1], s[j]
 		}
 	}

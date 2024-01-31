@@ -40,7 +40,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 	rf.changeState(StateFollower)
 	rf.electionTimer.Reset(RandomizedElectionTimeout())
-	if args.PrevLogTerm < rf.getFirstLog().Index {
+	if args.PrevLogIndex < rf.getFirstLog().Index {
 		// 缓存在快照中, 但是在之前已经被特判过, 所以应该警告一下, 然后返回
 		reply.Term, reply.Success = 0, false
 		DPrintf("{Node %v} receives unexpected AppendEntriesRequest %v from {Node %v} because prevLogIndex %v < firstLogIndex %v",
@@ -78,7 +78,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 }
 
-// handleAppendEntriesReply leader处理节点appendEntries之后返回的reply, 然后准备提交
+// handleAppendEntriesReply leader处理节点appendEntries之后返回的reply, 然后准备提交, 当然也要加锁, 已经加在了replicateOneRound中
 func (rf *Raft) handleAppendEntriesReply(peer int, args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	if rf.state == StateLeader && rf.currentTerm == args.Term {
 		if reply.Success {
@@ -95,7 +95,7 @@ func (rf *Raft) handleAppendEntriesReply(peer int, args *AppendEntriesArgs, repl
 				// 既然不是term的问题, 说明就是存在conflict
 				// 如果返回的Term等于-1, 说明leader要求的同步日志index高于peer节点的index
 				rf.nextIndex[peer] = reply.ConflictIndex
-				if reply.ConflictTerm != 1 {
+				if reply.ConflictTerm != -1 {
 					// 之前有log的term没有匹配, 其实就是previndex在节点中对应的log的term比当前的term小
 					// 可以在leader的日志中向前遍历, 找到那个第一个与节点返回的term相同的log
 					firstIndex := rf.getFirstLog().Index

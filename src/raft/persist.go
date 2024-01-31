@@ -6,8 +6,8 @@ import (
 )
 
 func (rf *Raft) GetRaftStateSize() int {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.mu.RLock()
+	defer rf.mu.RUnlock()
 	return rf.persister.RaftStateSize()
 }
 
@@ -46,7 +46,6 @@ func (rf *Raft) readPersist(data []byte) {
 		d.Decode(&voteFor) != nil ||
 		d.Decode(&logs) != nil {
 		DPrintf("{Node %v} restores persisted state failed", rf.me)
-		return
 	}
 	rf.currentTerm, rf.voteFor, rf.logs = currentTerm, voteFor, logs
 	// logs中一定会至少存在一个log

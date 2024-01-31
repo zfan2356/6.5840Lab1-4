@@ -1,5 +1,7 @@
 package raft
 
+import "fmt"
+
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 type RequestVoteArgs struct {
@@ -10,6 +12,10 @@ type RequestVoteArgs struct {
 	LastLogTerm  int // 最新的log的term
 }
 
+func (request RequestVoteArgs) String() string {
+	return fmt.Sprintf("{Term:%v,CandidateId:%v,LastLogIndex:%v,LastLogTerm:%v}", request.Term, request.CandidateId, request.LastLogIndex, request.LastLogTerm)
+}
+
 // example RequestVote RPC reply structure.
 // field names must start with capital letters!
 type RequestVoteReply struct {
@@ -18,19 +24,32 @@ type RequestVoteReply struct {
 	VoteGranted bool // 是否给你投票
 }
 
+func (response RequestVoteReply) String() string {
+	return fmt.Sprintf("{Term:%v,VoteGranted:%v}", response.Term, response.VoteGranted)
+}
+
 type AppendEntriesArgs struct {
 	Term         int
 	LeaderId     int
 	PrevLogIndex int // 节点当前最新的log的idx(闭区间)
 	PrevLogTerm  int
-	LeaderCommit int
+	LeaderCommit int // leader最新提交的日志index
 	Entries      []Entry
 }
+
+func (request AppendEntriesArgs) String() string {
+	return fmt.Sprintf("{Term:%v,LeaderId:%v,PrevLogIndex:%v,PrevLogTerm:%v,LeaderCommit:%v,Entries:%v}", request.Term, request.LeaderId, request.PrevLogIndex, request.PrevLogTerm, request.LeaderCommit, request.Entries)
+}
+
 type AppendEntriesReply struct {
 	Term          int
 	Success       bool
 	ConflictIndex int // 期望的term下的最小的index
 	ConflictTerm  int // 期望的term
+}
+
+func (response AppendEntriesReply) String() string {
+	return fmt.Sprintf("{Term:%v,Success:%v,ConflictIndex:%v,ConflictTerm:%v}", response.Term, response.Success, response.ConflictIndex, response.ConflictTerm)
 }
 
 type InstallSnapshotArgs struct {
@@ -41,8 +60,16 @@ type InstallSnapshotArgs struct {
 	Data              []byte
 }
 
+func (request InstallSnapshotArgs) String() string {
+	return fmt.Sprintf("{Term:%v,LeaderId:%v,LastIncludedIndex:%v,LastIncludedTerm:%v,DataSize:%v}", request.Term, request.LeaderId, request.LastIncludedIndex, request.LastIncludedTerm, len(request.Data))
+}
+
 type InstallSnapshotReply struct {
 	Term int
+}
+
+func (response InstallSnapshotReply) String() string {
+	return fmt.Sprintf("{Term:%v}", response.Term)
 }
 
 func (rf *Raft) genRequestVoteArgs() *RequestVoteArgs {

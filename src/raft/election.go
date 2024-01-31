@@ -39,7 +39,7 @@ func (rf *Raft) StartElection() {
 	grantedVotes := 1 // 来自本身的投票
 	rf.voteFor = rf.me
 	rf.persist()
-	for i := 0; i < len(rf.peers); i++ {
+	for i := range rf.peers {
 		if i == rf.me {
 			continue
 		}

@@ -28,7 +28,7 @@ import (
 
 // A Go object implementing a single Raft peer.
 type Raft struct {
-	mu        sync.Mutex          // Lock to protect shared access to this peer's state
+	mu        sync.RWMutex        // Lock to protect shared access to this peer's state
 	peers     []*labrpc.ClientEnd // RPC end points of all peers
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
@@ -59,8 +59,8 @@ type Raft struct {
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.mu.RLock()
+	defer rf.mu.RUnlock()
 	return rf.currentTerm, rf.state == StateLeader
 }
 func (rf *Raft) getLastLog() Entry {
@@ -70,11 +70,18 @@ func (rf *Raft) getFirstLog() Entry {
 	return rf.logs[0]
 }
 
-// needReplicating 编号为peer的服务器是否需要让其他节点更新日志 (只有Leader才能让其他节点同步自己的日志)
+// needReplicating 编号为peer的服务器是否需要更新日志 (只有Leader才能让其他节点同步自己的日志)
 func (rf *Raft) needReplicating(peer int) bool {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	rf.mu.RLock()
+	defer rf.mu.RUnlock()
 	return rf.state == StateLeader && rf.matchIndex[peer] < rf.getLastLog().Index
+}
+
+// HasLogInCurrentTerm 判断当前的term中是否已经有日志
+func (rf *Raft) HasLogInCurrentTerm() bool {
+	rf.mu.RLock()
+	defer rf.mu.RUnlock()
+	return rf.getLastLog().Term == rf.currentTerm
 }
 
 // matchLog 传进来的log是否匹配当前rf对应Index的log
@@ -88,19 +95,20 @@ func (rf *Raft) ifLogUpToDate(term, index int) bool {
 	return term > lastlog.Term || (term == lastlog.Term && index >= lastlog.Index)
 }
 
-// changeState 服务器改变状态
+// changeState 节点改变状态, 非原子, 调用时记得写锁
 func (rf *Raft) changeState(state NodeState) {
 	if rf.state == state {
 		return
 	}
-	// 这里转换state其实是刷新状态, 也有可能出现follower -> follower的情况, 实测如果return掉, 会出现FailNoAgree2B错误
+	// 这里转换state其实是刷新状态, 也有可能出现follower -> follower的情况, 这个时候应该在函数外更新定时器
 	DPrintf("{Node %d} changes state from %d to %d in term %d", rf.me, rf.state, state, rf.currentTerm)
 	rf.state = state
 	switch state {
 	case StateFollower:
 		rf.heartbeatTimer.Stop()
 		rf.electionTimer.Reset(RandomizedElectionTimeout())
-	case StateCandidate: // TODO 修改了一下, 按理说变成候选者之后应该再次开始计时, 广播心跳应该停一下
+	case StateCandidate:
+		// TODO 修改: 变成候选者之后election再次开始计时, 广播心跳停止
 		rf.heartbeatTimer.Stop()
 		rf.electionTimer.Reset(RandomizedElectionTimeout())
 	case StateLeader:
@@ -145,15 +153,17 @@ func (rf *Raft) advanceCommitIndexForFollower(leaderCommit int) {
 
 // BroadcastHeartBeat 广播心跳信号, 然后执行复制功能
 func (rf *Raft) BroadcastHeartBeat(isHeartBeat bool) {
-	for i := 0; i < len(rf.peers); i++ {
+	for i := range rf.peers {
 		if i == rf.me {
 			continue
 		}
+		// 这里如果isHeartBeat == true, 说明当前leader会发送心跳信号, 所以启动n-1
+		// 个协程来向n-1个节点发送信号
+		// 如果为false, 说明主动唤醒进行日志同步, 向n-1个replicator发送信号, 唤醒replicator进行日志同步
+		// 所以本质上都是调用replucateOneRound进行日志同步
 		if isHeartBeat {
-			// 广播心跳信号会让跟随者们复制领导者的信息
 			go rf.replicateOneRound(i)
 		} else {
-			// TODO 这里不明白是什么意思, 应该是leader给其他的节点发送信号, 也就是需要更新日志了
 			rf.replicatorCond[i].Signal()
 		}
 	}
@@ -161,17 +171,17 @@ func (rf *Raft) BroadcastHeartBeat(isHeartBeat bool) {
 
 // replicateOneRound 当前Leader给编号为peer的节点发送appendentries请求, 同步日志
 func (rf *Raft) replicateOneRound(peer int) {
-	rf.mu.Lock()
+	rf.mu.RLock()
 	if rf.state != StateLeader {
-		rf.mu.Unlock()
+		rf.mu.RUnlock()
 		return
 	}
 	// 相当于获得leader所认为的这个follower最新的log的index
 	prevLogIndex := rf.nextIndex[peer] - 1
 	if prevLogIndex < rf.getFirstLog().Index {
-		// TODO 已经被快照缓存下
+		// TODO 已经被快照缓存下, 所以可以更新peer节点的状态机, 变成快照状态
 		args := rf.genInstallSnapshotArgs()
-		rf.mu.Unlock()
+		rf.mu.RUnlock()
 		reply := new(InstallSnapshotReply)
 		if rf.sendInstallSnapshot(peer, args, reply) {
 			rf.mu.Lock()
@@ -180,7 +190,7 @@ func (rf *Raft) replicateOneRound(peer int) {
 		}
 	} else {
 		args := rf.genAppendEntriesArgs(prevLogIndex)
-		rf.mu.Unlock()
+		rf.mu.RUnlock()
 		reply := new(AppendEntriesReply)
 		if rf.sendAppendEntries(peer, args, reply) {
 			rf.mu.Lock()
@@ -206,7 +216,6 @@ func (rf *Raft) replicateOneRound(peer int) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
 	if rf.state != StateLeader {
 		return -1, -1, false
 	}
@@ -223,8 +232,10 @@ func (rf *Raft) Kill() {
 	// Your code here, if desired.
 }
 func (rf *Raft) killed() bool {
-	z := atomic.LoadInt32(&rf.dead)
-	return z == 1
+	return atomic.LoadInt32(&rf.dead) == 1
+}
+func (rf *Raft) Me() int {
+	return rf.me
 }
 
 // ticker 开启一个协程来监控节点的计时器是否到期
@@ -305,7 +316,6 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	// Your initialization code here (2A, 2B, 2C).
 	rf := &Raft{
-		mu:             sync.Mutex{},
 		peers:          peers,
 		persister:      persister,
 		me:             me,
@@ -316,13 +326,12 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		currentTerm:    0,
 		voteFor:        -1,
 		logs:           make([]Entry, 1),
-		commitIndex:    0,
-		lastApplied:    0,
 		nextIndex:      make([]int, len(peers)),
 		matchIndex:     make([]int, len(peers)),
 		electionTimer:  time.NewTimer(RandomizedElectionTimeout()),
 		heartbeatTimer: time.NewTimer(StableHeartBeatTimeout()),
 	}
+	rf.readPersist(persister.ReadRaftState())
 	// TODO 新增一句, 因为作为跟随者, 广播应该是useless的
 	rf.heartbeatTimer.Stop()
 	rf.applyCond = sync.NewCond(&rf.mu)
@@ -331,15 +340,14 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		rf.matchIndex[i], rf.nextIndex[i] = 0, lastLog.Index+1
 		if i != rf.me {
 			rf.replicatorCond[i] = sync.NewCond(&sync.Mutex{})
+			// start replicator goroutine to replicate entries in batch
 			go rf.replicator(i)
 		}
 	}
 
-	// initialize from state persisted before a crash
-	rf.readPersist(persister.ReadRaftState())
-
 	// start ticker goroutine to start elections
 	go rf.ticker()
+	// start applier goroutine to push committed logs into applyCh exactly once
 	go rf.applier()
 
 	return rf
