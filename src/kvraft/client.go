@@ -4,10 +4,12 @@ import "6.5840/labrpc"
 import "crypto/rand"
 import "math/big"
 
-
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// You will have to modify this struct.
+	leaderID  int64
+	clientID  int64
+	commandID int64
 }
 
 func nrand() int64 {
@@ -18,10 +20,24 @@ func nrand() int64 {
 }
 
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
-	ck := new(Clerk)
-	ck.servers = servers
-	// You'll have to add code here.
-	return ck
+	return &Clerk{
+		servers:   servers,
+		leaderID:  0,
+		clientID:  nrand(),
+		commandID: 0,
+	}
+}
+
+func (ck *Clerk) Command(args *CommandArgs) string {
+	for {
+		reply := new(CommandReply)
+		if !ck.servers[ck.leaderID].Call("KVServer.Command", args, reply) || reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
+			ck.leaderID = (ck.leaderID + 1) % int64(len(ck.servers))
+			continue
+		}
+		ck.commandID++
+		return reply.Value
+	}
 }
 
 // fetch the current value for a key.
@@ -34,10 +50,16 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // the types of args and reply (including whether they are pointers)
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
-func (ck *Clerk) Get(key string) string {
 
+func (ck *Clerk) Get(key string) string {
 	// You will have to modify this function.
-	return ""
+	return ck.Command(&CommandArgs{
+		Key:       key,
+		Value:     "",
+		Op:        OpGet,
+		ClientID:  ck.clientID,
+		CommandID: ck.commandID,
+	})
 }
 
 // shared by Put and Append.
@@ -48,13 +70,20 @@ func (ck *Clerk) Get(key string) string {
 // the types of args and reply (including whether they are pointers)
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
-func (ck *Clerk) PutAppend(key string, value string, op string) {
+func (ck *Clerk) PutAppend(key string, value string, op OperationOP) {
 	// You will have to modify this function.
+	ck.Command(&CommandArgs{
+		Key:       key,
+		Value:     value,
+		Op:        op,
+		ClientID:  ck.clientID,
+		CommandID: ck.commandID,
+	})
 }
 
 func (ck *Clerk) Put(key string, value string) {
-	ck.PutAppend(key, value, "Put")
+	ck.PutAppend(key, value, OpPut)
 }
 func (ck *Clerk) Append(key string, value string) {
-	ck.PutAppend(key, value, "Append")
+	ck.PutAppend(key, value, OpAppend)
 }

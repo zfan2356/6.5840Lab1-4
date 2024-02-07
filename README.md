@@ -37,3 +37,7 @@
 
 #### 4. Lba2D
 ![lab2D_result.png](img%2Flab2D_result.png)
+
+## Lab3: KV-Raft
+
+![img_4.png](img%2Fimg_4.png)

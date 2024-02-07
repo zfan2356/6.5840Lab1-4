@@ -24,6 +24,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
 // have more recent info since it communicate the snapshot on applyCh.
+// 判断当前节点是否可以安装快照, 如果可以的话就更新信息, 并且返回true, 不可以的话就返回false
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -34,6 +35,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 			rf.me, lastIncludedIndex, rf.commitIndex)
 		return false
 	}
+
 	if lastIncludedIndex > rf.getLastLog().Index {
 		rf.logs = make([]Entry, 1)
 	} else {
@@ -48,6 +50,7 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	return true
 }
 
+// InstallSnapshot 发送RPC请求, 安装快照
 func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
