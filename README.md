@@ -41,3 +41,10 @@
 ## Lab3: KV-Raft
 
 ![img_4.png](img%2Fimg_4.png)
+
+### 结果
+#### lab3A
+![lab3A_result.png](img%2Flab3A_result.png)
+
+#### lab3B
+![lab3B_result.png](img%2Flab3B_result.png)

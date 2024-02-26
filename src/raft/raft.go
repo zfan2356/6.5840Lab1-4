@@ -70,7 +70,7 @@ func (rf *Raft) getFirstLog() Entry {
 	return rf.logs[0]
 }
 
-// needReplicating 编号为peer的服务器是否需要更新日志 (只有Leader才能让其他节点同步自己的日志)
+// needReplicating 编号为peer的节点是否需要更新日志 (只有Leader才能让其他节点同步自己的日志)
 func (rf *Raft) needReplicating(peer int) bool {
 	rf.mu.RLock()
 	defer rf.mu.RUnlock()

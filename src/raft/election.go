@@ -25,8 +25,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 	rf.voteFor = args.CandidateId
-	// TODO 去掉了这一段话, 因为候选人投票按理说应该不影响自身计时器
-	//rf.electionTimer.Reset(RandomizedElectionTimeout())
+	// TODO 这样有助于网络不稳定下的选举问题
+	rf.electionTimer.Reset(RandomizedElectionTimeout())
 	reply.Term, reply.VoteGranted = rf.currentTerm, true
 
 }

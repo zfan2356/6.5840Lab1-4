@@ -28,8 +28,10 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	}
 }
 
+// Command 客户端向服务端发送RPC
 func (ck *Clerk) Command(args *CommandArgs) string {
 	for {
+		// 要不断循环, 找到raft集群中的leader, 才能发送指令
 		reply := new(CommandReply)
 		if !ck.servers[ck.leaderID].Call("KVServer.Command", args, reply) || reply.Err == ErrWrongLeader || reply.Err == ErrTimeout {
 			ck.leaderID = (ck.leaderID + 1) % int64(len(ck.servers))

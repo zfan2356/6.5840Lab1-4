@@ -13,7 +13,7 @@ import (
 type KVServer struct {
 	mu      sync.RWMutex
 	me      int
-	rf      *raft.Raft
+	rf      *raft.Raft // 内嵌raft节点
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
 
@@ -25,6 +25,7 @@ type KVServer struct {
 	notifyChans    map[int]chan *CommandReply
 }
 
+// isDuplicateArgs 判断当前的指令编号是否是过期的指令
 func (kv *KVServer) isDuplicateArgs(clientID, commandID int64) bool {
 	opcontext, ok := kv.lastOperations[clientID]
 	return ok && opcontext.MaxAppliedCommandID >= commandID
@@ -50,7 +51,7 @@ func (kv *KVServer) Command(args *CommandArgs, reply *CommandReply) {
 	kv.mu.Lock()
 	ch := kv.getNotifyChan(index)
 	kv.mu.Unlock()
-	// 等待回复reply
+	// 等待回复reply, 需要做超时处理, 超时就代表raft那边没有应用该指令
 	select {
 	case res := <-ch:
 		reply.Value, reply.Err = res.Value, res.Err
@@ -77,7 +78,6 @@ func (kv *KVServer) Kill() {
 	DPrintf("{Node %v} has been killed", kv.rf.Me())
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
-	// Your code here, if desired.
 }
 
 func (kv *KVServer) killed() bool {
@@ -85,6 +85,7 @@ func (kv *KVServer) killed() bool {
 	return z == 1
 }
 
+// applyLogToStateMachine 将command应用到状态机中, 返回一个reply
 func (kv *KVServer) applyLogToStateMachine(command Command) *CommandReply {
 	var value string
 	var err Err
@@ -102,6 +103,7 @@ func (kv *KVServer) applyLogToStateMachine(command Command) *CommandReply {
 	}
 }
 
+// applier 守护线程, 用于监控applyCh中的提交的日志, 然后应用到状态机中, raft通过notifyCh将成功执行的指令返回给server
 func (kv *KVServer) applier() {
 	for kv.killed() == false {
 		select {
@@ -188,7 +190,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Command{})
 
-	applyCh := make(chan raft.ApplyMsg)
+	applyCh := make(chan raft.ApplyMsg) // raft节点和KVServer节点共用一个applyCh
 	kv := &KVServer{
 		mu:             sync.RWMutex{},
 		me:             me,
