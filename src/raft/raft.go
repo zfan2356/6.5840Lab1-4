@@ -276,7 +276,7 @@ func (rf *Raft) replicator(peer int) {
 	}
 }
 
-// applier 监控日志的提交过程
+// applier 监控日志的应用过程
 func (rf *Raft) applier() {
 	for rf.killed() == false {
 		rf.mu.Lock()

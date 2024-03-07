@@ -13,7 +13,7 @@
 
 ## Lab2: Raft
 [raft论文中文翻译](https://zhuanlan.zhihu.com/p/343560811)
-
+[raft论文讲解](https://blog.csdn.net/Hedon954/article/details/119186225)
 [很不错的raft实现过程和原理](https://www.cnblogs.com/brianleelxt/p/13251540.html)
 ### 选举过程
 ![img.png](img%2Fimg.png)
@@ -24,6 +24,8 @@
 ### 大概设计
 ![img_3.png](img%2Fimg_3.png)
 
+有关日志的corner case
+![img_5.png](img%2Fimg_5.png)
 
 ### 结果
 #### 1. Lab2A

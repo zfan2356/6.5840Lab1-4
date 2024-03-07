@@ -19,7 +19,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.changeState(StateFollower)
 		rf.currentTerm, rf.voteFor = args.Term, -1
 	}
-	// 如果当前节点的没有过期, 也就是当前节点版本不小于候选人版本, 所以可以返回false
+	// 如果当前节点的日志比候选者日志要新，那么也直接false
 	if !rf.ifLogUpToDate(args.LastLogTerm, args.LastLogIndex) {
 		reply.Term, reply.VoteGranted = rf.currentTerm, false
 		return
